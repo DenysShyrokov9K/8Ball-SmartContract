@@ -54,6 +54,8 @@ ReentrancyGuardUpgradeable, StandardAccessControl, ChainlinkVRFConsumer {
     CountersUpgradeable.Counter private _counter;
     // wallet => credits | 1 credit is worth 1 cue.
     mapping (address => uint256) public credits;
+    // wallet => credits | 1 credit is worth 1 upgrade.
+    mapping (address => uint256) public upgradeCredits;
     /*************
      * Construct *
      *************/
@@ -127,10 +129,21 @@ ReentrancyGuardUpgradeable, StandardAccessControl, ChainlinkVRFConsumer {
         I8BallCue _cue = I8BallCue(cue);
         Cue memory cue_ = _cue.getCue(tokenId);
         uint256 max = cue_.rarity == Rarity.Common ? 5 : 6 + uint256(cue_.rarity);
+        uint256 total = power + accuracy + spin + time;
+        if (upgradeCredits[msg.sender] >= 0) {
+            if (upgradeCredits[msg.sender] > total) {
+                upgradeCredits[msg.sender] -= total;
+                total = 0;
+            } else {
+                total -= upgradeCredits[msg.sender];
+                upgradeCredits[msg.sender] = 0;
+            }
+        }
         uint256 cost = (power + accuracy + spin + time) * upgradePrice;
-
-        require(msg.value >= cost, "8BallCueMinter::Insufficient payment");
-        payable(treasury).transfer(cost);
+        if (cost > 0) {
+            require(msg.value >= cost, "8BallCueMinter::Insufficient payment");
+            payable(treasury).transfer(cost);
+        }
 
         cue_.power += power;
         cue_.accuracy += accuracy;
@@ -261,6 +274,22 @@ ReentrancyGuardUpgradeable, StandardAccessControl, ChainlinkVRFConsumer {
         }
     }
 
+    function addUpgradeCredits(address wallet, uint256 _credits) external onlyAdmin {
+        if (upgradeCredits[wallet] + _credits > 100) {
+            upgradeCredits[wallet] = 100;
+        } else {
+            upgradeCredits[wallet] += _credits;
+        }
+    }
+
+    function removeUpgradeCredits(address wallet, uint256 _credits) external onlyAdmin {
+        if (upgradeCredits[wallet] < _credits) {
+            upgradeCredits[wallet] = 0;
+        } else {
+            upgradeCredits[wallet] -= _credits;
+        }
+    }
+
     function getCollectionIds() external view returns (uint256[] memory) {
         return _collectionIds.values();
     }
@@ -323,6 +352,11 @@ ReentrancyGuardUpgradeable, StandardAccessControl, ChainlinkVRFConsumer {
 
     function setCue(address _cue) external onlyAdmin {
         cue = _cue;
+    }
+
+    function setUpgradePrice(uint256 _upgradePrice) external onlyAdmin {
+        require(_upgradePrice > 0 && _upgradePrice != upgradePrice, "8BallCueMinter::Invalid Upgrade Price");
+        upgradePrice = _upgradePrice;
     }
 
     function _processPayment(uint256 collectionId) internal returns (uint256) {
